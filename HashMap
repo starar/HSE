@@ -1,0 +1,337 @@
+#include <iostream>
+#include <vector>
+#include <list>
+#include <stdexcept>
+#include <utility>
+
+const size_t DEFAULT_SIZE = 100;
+
+template<class KeyType, class ValueType, class Hash>
+class iterator;
+
+template<class KeyType, class ValueType, class Hash>
+class const_iterator;
+
+template<class KeyType, class ValueType, class Hash = std::hash<KeyType> >
+class HashMap {
+private:
+    std::vector<std::list<std::pair<const KeyType, ValueType>>> table;
+    Hash hash;
+    size_t entriesCount;
+    size_t Size;
+
+public:
+    typedef iterator<KeyType, ValueType, Hash> iterator;
+    typedef const_iterator<KeyType, ValueType, Hash> const_iterator;
+
+    explicit HashMap(Hash h = Hash())
+            : hash(h), entriesCount(0), Size(DEFAULT_SIZE) {
+        table.resize(Size);
+    }
+
+    template<class Iterator>
+    HashMap(Iterator begin, Iterator end, Hash h = Hash())
+            : hash(h), entriesCount(0), Size(DEFAULT_SIZE) {
+        table.resize(Size);
+        while (begin != end) {
+            insert(*begin);
+            begin++;
+        }
+    }
+
+    HashMap(std::initializer_list<std::pair<const KeyType, ValueType>> list, Hash h = Hash())
+            : hash(h), entriesCount(0), Size(DEFAULT_SIZE) {
+        table.resize(Size);
+        for (const auto &i: list) {
+            insert(i);
+        }
+    }
+
+    iterator begin() {
+        typename std::list<std::pair<const KeyType, ValueType>>::iterator indexInBucket;
+        size_t index = 0;
+        while (index < table.size() && table[index].empty()) {
+            index++;
+        }
+        if (index < table.size()) {
+            indexInBucket = table[index].begin();
+        } else {
+            indexInBucket = table[table.size() - 1].end();
+        }
+        return iterator(indexInBucket, index, &table);
+    }
+
+    iterator end() {
+        return iterator(table[table.size() - 1].end(), table.size(), &table);
+    }
+
+    const_iterator begin() const {
+        typename std::list<std::pair<const KeyType, ValueType>>::const_iterator indexInBucket;
+        size_t index = 0;
+        while (index < table.size() && table[index].empty()) {
+            index++;
+        }
+        if (index < table.size()) {
+            indexInBucket = table[index].begin();
+        } else {
+            indexInBucket = table[table.size() - 1].end();
+        }
+        return const_iterator(indexInBucket, index, &table);
+    }
+
+    const_iterator end() const {
+        return const_iterator(table[table.size() - 1].end(), table.size(), &table);
+    }
+
+    size_t size() const {
+        return entriesCount;
+    }
+
+    bool empty() const {
+        return entriesCount == 0;
+    }
+
+    Hash hash_function() const {
+        return hash;
+    }
+
+    size_t findIndex(KeyType key, size_t size) const {
+        return hash(key) % size;
+    }
+
+    double load_factor() {
+        return static_cast<double>(entriesCount) / Size;
+    }
+
+    size_t valueOfSize() const {
+        return Size;
+    }
+
+    bool rebuild() {
+        if (load_factor() < 2) {
+            return false;
+        }
+        size_t newSize = Size * 2;
+        std::vector<std::list<std::pair<const KeyType, ValueType>>> newTable;
+        newTable.resize(newSize);
+        for (const auto &i: *this) {
+            size_t index = findIndex(i.first, newSize);
+            newTable[index].push_front(i);
+        }
+        Size = newSize;
+        table = move(newTable);
+        return true;
+    }
+
+    std::pair<const KeyType, ValueType> &insert(std::pair<const KeyType, ValueType> entry) {
+        iterator iter;
+        iter = find(entry.first);
+        if (iter != end()) {
+            return *iter;
+        }
+        size_t index = findIndex(entry.first, Size);
+        table[index].push_front(entry);
+        entriesCount++;
+        if (rebuild()) {
+            iter = find(entry.first);
+            if (iter != end()) {
+                return *iter;
+            }
+        }
+        return table[index].front();
+    }
+
+    void erase(const KeyType entry) {
+        size_t index = findIndex(entry, Size);
+        for (auto i = table[index].begin(); i != table[index].end(); ++i) {
+            if (i->first == entry) {
+                table[index].erase(i);
+                entriesCount--;
+                rebuild();
+                return;
+            }
+        }
+    }
+
+    ValueType &operator[](const KeyType &key) {
+        iterator iter;
+        iter = find(key);
+        if (iter != end()) {
+            return iter->second;
+        }
+        return insert({key, ValueType{}}).second;
+    }
+
+    const ValueType &at(const KeyType &key) const {
+        const_iterator iter;
+        iter = find(key);
+        if (iter != end()) {
+            return iter->second;
+        }
+        throw std::out_of_range("");
+    }
+
+    HashMap &operator=(const HashMap &rvalue) {
+        if (this == &rvalue) {
+            return *this;
+        }
+        clear();
+        Size = rvalue.valueOfSize();
+        table.resize(Size);
+        for (const auto &i: rvalue) {
+            size_t index = findIndex(i.first, Size);
+            table[index].push_front(i);
+            entriesCount++;
+        }
+        return *this;
+    }
+
+    void clear() {
+        table.clear();
+        entriesCount = 0;
+        Size = DEFAULT_SIZE;
+        table.resize(Size);
+    }
+
+    iterator find(const KeyType &key) {
+        size_t index = findIndex(key, Size);
+        auto indexInBucket = table[index].end();
+        for (auto i = table[index].begin(); i != table[index].end(); ++i) {
+            if (i->first == key) {
+                indexInBucket = i;
+                break;
+            }
+        }
+        if (indexInBucket == table[index].end()) {
+            return end();
+        }
+        return iterator(indexInBucket, index, &table);
+    }
+
+    const_iterator find(const KeyType &key) const {
+        size_t index = findIndex(key, Size);
+        auto indexInBucket = table[index].end();
+        for (auto i = table[index].begin(); i != table[index].end(); ++i) {
+            if (i->first == key) {
+                indexInBucket = i;
+                break;
+            }
+        }
+        if (indexInBucket == table[index].end()) {
+            return end();
+        }
+        return const_iterator(indexInBucket, index, &table);
+    }
+};
+
+template<class KeyType, class ValueType, class Hash = std::hash<KeyType> >
+class iterator {
+public:
+    iterator() = default;
+
+    iterator(typename std::list<std::pair<const KeyType, ValueType>>::iterator _indexInBucket,
+             size_t _index,
+             std::vector<std::list<std::pair<const KeyType, ValueType>>> *_table)
+            : indexInBucket(_indexInBucket), index(_index), table(_table) {}
+
+    iterator &operator++() {
+        indexInBucket++;
+        if ((*table)[index].end() == indexInBucket) {
+            index++;
+            while (index < (*table).size() && (*table)[index].empty()) {
+                index++;
+            }
+            if (index < table->size()) {
+                indexInBucket = (*table)[index].begin();
+            } else {
+                indexInBucket = (*table)[table->size() - 1].end();
+            }
+        }
+        return *this;
+    }
+
+    const iterator operator++(int junk) {
+        iterator temp = *this;
+        ++(*this);
+        return temp;
+    }
+
+    std::pair<const KeyType, ValueType> &operator*() {
+        return *indexInBucket;
+    }
+
+    std::pair<const KeyType, ValueType> *operator->() {
+        return &*indexInBucket;
+    }
+
+    bool operator==(const iterator &rvalue) const {
+        return indexInBucket == rvalue.indexInBucket
+               && index == rvalue.index
+               && table == rvalue.table;
+    }
+
+    bool operator!=(const iterator &rvalue) const {
+        return !((*this) == rvalue);
+    }
+
+private:
+    typename std::list<std::pair<const KeyType, ValueType>>::iterator indexInBucket;
+    size_t index;
+    std::vector<std::list<std::pair<const KeyType, ValueType>>> *table;
+};
+
+template<class KeyType, class ValueType, class Hash = std::hash<KeyType> >
+class const_iterator {
+public:
+    const_iterator() = default;
+
+    const_iterator(typename std::list<std::pair<const KeyType, ValueType>>::const_iterator _indexInBucket,
+                   size_t _index,
+                   const std::vector<std::list<std::pair<const KeyType, ValueType>>> *_table)
+            : indexInBucket(_indexInBucket), index(_index), table(_table) {}
+
+    const const_iterator &operator++() {
+        indexInBucket++;
+        if ((*table)[index].end() == indexInBucket) {
+            index++;
+            while (index < (*table).size() && (*table)[index].empty()) {
+                index++;
+            }
+            if (index < table->size()) {
+                indexInBucket = (*table)[index].begin();
+            } else {
+                indexInBucket = (*table)[table->size() - 1].end();
+            }
+        }
+        return *this;
+    }
+
+    const const_iterator operator++(int junk) {
+        const_iterator temp = *this;
+        ++(*this);
+        return temp;
+    }
+
+    const std::pair<const KeyType, ValueType> &operator*() {
+        return *indexInBucket;
+    }
+
+    const std::pair<const KeyType, ValueType> *operator->() {
+        return &*indexInBucket;
+    }
+
+    bool operator==(const const_iterator &rvalue) const {
+        return indexInBucket == rvalue.indexInBucket
+               && index == rvalue.index
+               && table == rvalue.table;
+    }
+
+    bool operator!=(const const_iterator &rvalue) const {
+        return !((*this) == rvalue);
+    }
+
+private:
+    typename std::list<std::pair<const KeyType, ValueType>>::const_iterator indexInBucket;
+    size_t index;
+    const std::vector<std::list<std::pair<const KeyType, ValueType>>> *table;
+};
